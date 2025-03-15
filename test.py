@@ -58,7 +58,9 @@ def updateData(DeviceModel):
 
     # 更新速度并进行速度漂移校正
     if all([acc_x, acc_y, acc_z, roll, pitch, yaw]):
-        velocity_x, velocity_y, velocity_z = integrate_and_correct_velocity(acc_x, acc_y, acc_z, roll, pitch, yaw, dt)
+        velocity_x, velocity_y, velocity_z = integrate_and_correct_velocity(acc_x, acc_y, acc_z, roll, pitch, yaw,
+                                                                            dt)
+
         # 输出X, Y, Z轴的速度 Print X, Y, Z axis velocities
         # print(f"Velocity X: {velocity_x:.2f} m/s, Y: {velocity_y:.2f} m/s, Z: {velocity_z:.2f} m/s")
         # 计算并输出合速度 Calculate and print the resultant speed
@@ -115,13 +117,24 @@ def integrate_and_correct_velocity(acc_x, acc_y, acc_z, roll, pitch, yaw, dt):
     r = rotation_matrix_from_body_to_ned(roll, pitch, yaw)
     gravity = np.array([[0], [0], [1]])
     gravity_subtraction_vector = np.dot(r, gravity)
+    # 定义静止状态的加速度阈值
+    STOP_THRESHOLD = 0.1
+    ax = acc_x - gravity_subtraction_vector[0, 0]
+    ay = acc_y - gravity_subtraction_vector[1, 0]
+    az = acc_z - gravity_subtraction_vector[2, 0]
 
-    # 使用梯形法则进行数值积分
-    if dt > 0:
-        velocity_x += (acc_x + gravity_subtraction_vector[0, 0]) * dt
-        velocity_y += (acc_y + gravity_subtraction_vector[1, 0]) * dt
-        velocity_z += (acc_z + gravity_subtraction_vector[2, 0]) * dt
-
+    # 判断是否停止
+    isStop = (abs(ax) < STOP_THRESHOLD and abs(ay) < STOP_THRESHOLD and abs(az) < STOP_THRESHOLD)
+    if not isStop:
+        # 使用梯形法则进行数值积分
+        if dt > 0:
+            velocity_x += ax * dt
+            velocity_y += ay * dt
+            velocity_z += az * dt
+    else:  # 如果设备停止
+        velocity_x = 0
+        velocity_y = 0
+        velocity_z = 0
     return velocity_x, velocity_y, velocity_z
 
 
