@@ -2,6 +2,8 @@ import asyncio
 import math
 
 import bleak
+from datetime import datetime
+import time
 import numpy as np
 
 import device_model
@@ -31,12 +33,14 @@ def updateData(DeviceModel):
     global last_time, velocity_x, velocity_y, velocity_z
 
     # 获取当前时间戳 Get current timestamp
-    current_time = DeviceModel.get("Timestamp")  # 假设存在时间戳字段 Assume there is a timestamp field
+    current_datetime = datetime.now()
+    current_time = current_datetime.timestamp()
+
     if last_time is not None:
-        dt = (current_time - last_time) / 1000.0  # 计算时间差 Calculate time difference in seconds
+        dt = current_time - last_time
     else:
-        dt = 0.0  # 如果是第一次调用，则不更新速度 If this is the first call, do not update velocity
-    last_time = current_time  # 更新最后时间戳 Update last timestamp
+        dt = 0.0
+    last_time = current_time  # 更新最后时间戳
 
     # 获得加速度数据
     acc_x = DeviceModel.get("AccX")
@@ -47,17 +51,22 @@ def updateData(DeviceModel):
     roll = math.radians(DeviceModel.get("AngX"))
     pitch = math.radians(DeviceModel.get("AngY"))
     yaw = math.radians(DeviceModel.get("AngZ"))
+    # 打印加速度数据
+    # print(f"加速度数据: AccX={acc_x}, AccY={acc_y}, AccZ={acc_z}")
+    # 打印欧拉角数据
+    # print(f"欧拉角数据: Roll={roll:.2f} rad, Pitch={pitch:.2f} rad, Yaw={yaw:.2f} rad")
 
     # 更新速度并进行速度漂移校正
     if all([acc_x, acc_y, acc_z, roll, pitch, yaw]):
         velocity_x, velocity_y, velocity_z = integrate_and_correct_velocity(acc_x, acc_y, acc_z, roll, pitch, yaw, dt)
         # 输出X, Y, Z轴的速度 Print X, Y, Z axis velocities
-        print(f"Velocity X: {velocity_x:.2f} m/s, Y: {velocity_y:.2f} m/s, Z: {velocity_z:.2f} m/s")
+        # print(f"Velocity X: {velocity_x:.2f} m/s, Y: {velocity_y:.2f} m/s, Z: {velocity_z:.2f} m/s")
         # 计算并输出合速度 Calculate and print the resultant speed
-        # resultant_speed = np.sqrt(velocity_x ** 2 + velocity_y ** 2 + velocity_z ** 2)
-        # print(f"Resultant Speed: {resultant_speed:.2f} m/s")
+        resultant_speed = np.sqrt(velocity_x ** 2 + velocity_y ** 2 + velocity_z ** 2)
+        print(f"Resultant Speed: {resultant_speed:.2f} m/s")
     else:
         print("Warning: Missing or invalid data for updating velocity. Skipping this update.")
+
 
 def rotation_matrix_from_body_to_ned(roll, pitch, yaw):
     """
