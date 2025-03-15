@@ -5,6 +5,10 @@ import bleak
 from datetime import datetime
 import time
 import numpy as np
+import threading
+
+from matplotlib import pyplot as plt
+from matplotlib.animation import FuncAnimation
 
 import device_model
 
@@ -15,6 +19,12 @@ BLEDevice = None
 
 # 初始化状态变量 Initialize state variables
 last_time = None  # 上次更新时间 Last update time
+acc_x = 0.0  # X轴加速度
+acc_y = 0.0  # Y轴加速度
+acc_z = 0.0  # Z轴加速度
+roll = 0.0
+pitch = 0.0
+yaw = 0.0
 velocity_x = 0.0  # X轴速度 X-axis velocity
 velocity_y = 0.0  # Y轴速度 Y-axis velocity
 velocity_z = 0.0  # Z轴速度 Z-axis velocity
@@ -30,7 +40,7 @@ async def scanByMac(device_mac):
 
 # 数据更新时会调用此方法
 def updateData(DeviceModel):
-    global last_time, velocity_x, velocity_y, velocity_z
+    global last_time, velocity_x, velocity_y, velocity_z, acc_x, acc_y, acc_z, roll, pitch, yaw
 
     # 获取当前时间戳 Get current timestamp
     current_datetime = datetime.now()
@@ -51,23 +61,9 @@ def updateData(DeviceModel):
     roll = math.radians(DeviceModel.get("AngX"))
     pitch = math.radians(DeviceModel.get("AngY"))
     yaw = math.radians(DeviceModel.get("AngZ"))
-    # 打印加速度数据
-    # print(f"加速度数据: AccX={acc_x}, AccY={acc_y}, AccZ={acc_z}")
-    # 打印欧拉角数据
-    # print(f"欧拉角数据: Roll={roll:.2f} rad, Pitch={pitch:.2f} rad, Yaw={yaw:.2f} rad")
 
     # 更新速度并进行速度漂移校正
-    if all([acc_x, acc_y, acc_z, roll, pitch, yaw]):
-        velocity_x, velocity_y, velocity_z = integrate_and_correct_velocity(acc_x, acc_y, acc_z, roll, pitch, yaw,
-                                                                            dt)
-
-        # 输出X, Y, Z轴的速度 Print X, Y, Z axis velocities
-        # print(f"Velocity X: {velocity_x:.2f} m/s, Y: {velocity_y:.2f} m/s, Z: {velocity_z:.2f} m/s")
-        # 计算并输出合速度 Calculate and print the resultant speed
-        resultant_speed = np.sqrt(velocity_x ** 2 + velocity_y ** 2 + velocity_z ** 2)
-        print(f"Resultant Speed: {resultant_speed:.2f} m/s")
-    else:
-        print("Warning: Missing or invalid data for updating velocity. Skipping this update.")
+    velocity_x, velocity_y, velocity_z = integrate_and_correct_velocity(dt)
 
 
 def rotation_matrix_from_body_to_ned(roll, pitch, yaw):
@@ -100,19 +96,13 @@ def rotation_matrix_from_body_to_ned(roll, pitch, yaw):
     return r
 
 
-def integrate_and_correct_velocity(acc_x, acc_y, acc_z, roll, pitch, yaw, dt):
+def integrate_and_correct_velocity(dt):
     """
     对加速度进行重力校正并进行数值积分，返回更新后的速度。
-    :param acc_x: X轴加速度
-    :param acc_y: Y轴加速度
-    :param acc_z: Z轴加速度
-    :param roll: 滚转角（绕X轴），单位为弧度。
-    :param pitch: 俯仰角（绕Y轴），单位为弧度。
-    :param yaw: 偏航角（绕Z轴），单位为弧度。
     :param dt: 时间差
     :return: 更新后的速度 (vx, vy, vz)
     """
-    global velocity_x, velocity_y, velocity_z
+    global velocity_x, velocity_y, velocity_z, acc_x, acc_y, acc_z, roll, pitch, yaw
     # 生成校正矩阵，需要生成重力扣除向量
     r = rotation_matrix_from_body_to_ned(roll, pitch, yaw)
     gravity = np.array([[0], [0], [1]])
@@ -138,7 +128,89 @@ def integrate_and_correct_velocity(acc_x, acc_y, acc_z, roll, pitch, yaw, dt):
     return velocity_x, velocity_y, velocity_z
 
 
+def print_velocity_data():
+    while True:
+        # 打印分割行
+        print("**************************************************")
+        # 打印速度数据
+        print(f"速度数据：velocity_x: {velocity_x:.2f}, velocity_y={velocity_y:.2f}, velocity_z={velocity_z:.2f}")
+        # 打印加速度数据
+        print(f"加速度数据: AccX={acc_x}, AccY={acc_y}, AccZ={acc_z}")
+        # 打印欧拉角数据
+        print(f"欧拉角数据: Roll={roll:.2f} rad, Pitch={pitch:.2f} rad, Yaw={yaw:.2f} rad")
+        # 打印分割行
+        print("**************************************************")
+        time.sleep(3)
+
+
+def draw_acc_data():
+    # 全局变量
+    global acc_x, acc_y, acc_z
+
+    acc_x_list = []
+    acc_y_list = []
+    acc_z_list = []
+
+    # 更新加速度数据列表的函数
+    def update_data_lists():
+        acc_x_list.append(acc_x)
+        acc_y_list.append(acc_y)
+        acc_z_list.append(acc_z)
+
+        # 保持列表只包含最近的600个数据点
+        if len(acc_x_list) > 600:
+            acc_x_list.pop(0)
+            acc_y_list.pop(0)
+            acc_z_list.pop(0)
+
+    # 创建图形和轴
+    fig, ax = plt.subplots()
+    line_x, = ax.plot([], [], label='X Acc')
+    line_y, = ax.plot([], [], label='Y Acc')
+    line_z, = ax.plot([], [], label='Z Acc')
+    ax.legend()
+
+    # 设置标题和坐标轴标签
+    ax.set_title('Acceleration Data Real-time Display')
+    ax.set_xlabel('Time (samples)')
+    ax.set_ylabel('Acceleration (g)')
+
+    # 动画初始化函数
+    def init():
+        ax.set_xlim(0, 600)
+        ax.set_ylim(-2, 2)
+        return line_x, line_y, line_z  # 返回所有需要更新的对象
+
+    # 动画更新函数
+    def update(frame):
+        update_data_lists()  # 更新数据
+        print(acc_x_list)
+        line_x.set_data(range(len(acc_x_list)), acc_x) # 还需要往里面添加数据，添加数据的功能还没实现成功。
+        line_y.set_data(range(len(acc_y_list)), acc_y)
+        line_z.set_data(range(len(acc_z_list)), acc_z)
+        return line_x, line_y, line_z  # 同样返回所有更新过的对象
+
+    # 创建动画
+    while True:
+        print(acc_x)
+        print(acc_y)
+        print(acc_z)
+        time.sleep(0.1)
+
+    ani = FuncAnimation(fig, update, frames=600, init_func=init, blit=True)
+
+    plt.show()
+
+
 if __name__ == '__main__':
+
+    # 开启数据打印线程
+    t1 = threading.Thread(target=print_velocity_data)
+    t1.start()
+
+    t2 = threading.Thread(target=draw_acc_data)
+    t2.start()
+
     # 指定MAC地址搜索并连接设备
     asyncio.run(scanByMac("F0:FC:E2:AD:C1:7E"))
 
@@ -148,4 +220,5 @@ if __name__ == '__main__':
         # 开始连接设备
         asyncio.run(device.openDevice())
     else:
-        print("This BLEDevice was not found!!")
+        while True:
+            print("This BLEDevice was not found!!")
